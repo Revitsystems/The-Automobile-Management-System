@@ -3,6 +3,9 @@ import bodyParser from "body-parser";
 import cors from "cors";
 import dotenv from "dotenv";
 import pg from "pg";
+import { DateTime } from "luxon";
+import cron from "node-cron";
+import nodemailer from "nodemailer";
 dotenv.config(); // Load environment variables
 
 const app = express();
@@ -22,17 +25,15 @@ app.get("/car-list", (req, res) => {
 
 // PostgreSQL connection
 const db = new pg.Client({
-  user: "postgres",
-  host: "localhost",
-  database: "The_AMS_Database",
-  password: "Brio1234",
-  port: 5432,
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT || 5432,
 });
-db.connect();
-app.get("/", (req, res) => {
-  res.send("Welcome to Auto Care Manager API!");
-});
-
+db.connect()
+  .then(() => console.log("Connected to PostgreSQL"))
+  .catch((err) => console.error("Database connection error:", err));
 //***************************************************************/*/
 //****** Route to handle every thing for the Customer table ******//
 //***************************************************************/*/
@@ -182,7 +183,7 @@ app.patch("/update_customer/:customer_id", async (req, res) => {
 });
 
 //****************************************************************/*/
-//****** RRoute to handle every thing for the vehicle table *******//
+//****** Route to handle every thing for the vehicle table *******//
 //****************************************************************/*/
 
 //********* Route to create new vehicle info *********//
@@ -339,7 +340,7 @@ app.patch("/update_vehicle/:vehicle_id", async (req, res) => {
 
     res.status(200).json({
       message: "Vehicle updated successfully.",
-      customer: result.rows[0], // Fix: Returning correct data
+      vehicles: result.rows[0], // Fix: Returning correct data
     });
   } catch (error) {
     console.error("Error updating Vehicle:", error);
@@ -471,53 +472,86 @@ app.patch("/update_mechanic/:mechanic_id", async (req, res) => {
 //***** Route to schedule a maintenance reminder *****//
 //***************************************************/*/
 
-// Route to book a schedule
+// Route to book a schedule// POST route for booking service schedule
+// Nodemailer transporter setup (example using Gmail)
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "godsbrightc@gmail.com",
+    pass: "ftgh euhw jcdt eix", // Use environment variables for security
+  },
+});
+
+// Function to send email
+const sendEmail = async (recipientEmail, subject, message) => {
+  const mailOptions = {
+    from: "godsbrightc@gmail.com",
+    to: recipientEmail,
+    subject: subject,
+    text: message,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log("Email sent successfully!");
+  } catch (error) {
+    console.error("Error sending email:", error);
+  }
+};
+
+// Route for booking a scheduleconst { DateTime } = require("luxon");
+
 app.post("/book_schedule", async (req, res) => {
   try {
-    const {
-      customer_id,
-      vehicle_id,
-      service_type,
-      service_date,
-      service_time,
-    } = req.body;
+    const { customer_id, vehicle_id, service_type, service_date } = req.body;
 
-    // Input validation: Ensure required fields are provided
-    if (
-      !customer_id ||
-      !vehicle_id ||
-      !service_type ||
-      !service_date ||
-      !service_time
-    ) {
+    // Input validation
+    if (!customer_id || !vehicle_id || !service_type || !service_date) {
       return res.status(400).json({
         error:
-          "Customer ID, Vehicle ID, Service Type, Service Date, and Service Time are required.",
+          "Customer ID, Vehicle ID, Service Type, and Service Date are required.",
       });
     }
 
-    // Insert query to book the schedule
-    const query = `
-      INSERT INTO schedules (customer_id, vehicle_id, service_type, service_date, service_time)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING schedule_id, customer_id, vehicle_id, service_type, service_date, service_time, status, date_created;
+    // Log received date
+    console.log("Received service_date:", service_date);
+
+    // Format service_date correctly using UTC (Luxon)
+    const formattedDate = DateTime.fromISO(service_date, {
+      zone: "utc",
+    }).toISO();
+    console.log("Formatted service_date (UTC):", formattedDate);
+
+    // Insert the schedule into the database
+    const insertQuery = `
+      INSERT INTO schedules (customer_id, vehicle_id, service_type, service_date)
+      VALUES ($1, $2, $3, $4)
+      RETURNING schedule_id;
     `;
+    const insertValues = [customer_id, vehicle_id, service_type, formattedDate];
 
-    const values = [
-      customer_id,
-      vehicle_id,
-      service_type,
-      service_date,
-      service_time,
-    ];
+    // Execute the insert query
+    const insertResult = await db.query(insertQuery, insertValues);
+    const scheduleId = insertResult.rows[0].schedule_id;
 
-    // Query execution
-    const result = await db.query(query, values);
+    if (!scheduleId) {
+      throw new Error("Failed to insert schedule.");
+    }
 
-    // Sending a successful response
+    // Fetch the schedule from the database using the returned schedule_id
+    const fetchQuery = `
+      SELECT schedule_id, customer_id, vehicle_id, service_type, service_date, status, date_created
+      FROM schedules WHERE schedule_id = $1;
+    `;
+    const fetchResult = await db.query(fetchQuery, [scheduleId]);
+    const scheduleDetails = fetchResult.rows[0];
+    console.log("Raw service_date from DB:", scheduleDetails.service_date);
+
+    // Sending a successful response with fetched data
     res.status(201).json({
-      message: "Schedule booked successfully",
-      schedule: result.rows[0],
+      message: "Schedule booked successfully and reminders will be sent!",
+      schedule: scheduleDetails,
     });
   } catch (error) {
     console.error("Error booking schedule:", error);
@@ -575,148 +609,6 @@ app.post("/create_service_log", async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating service log:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-//************************************************/*/
-//********* Route to change customer info *********//
-//************************************************/*/
-
-app.patch("/update_customer/:customer_id", async (req, res) => {
-  try {
-    const customer_id = parseInt(req.params.customer_id);
-    const { fname, lname, email_address, phone_number } = req.body;
-    console.log(customer_id);
-    if (isNaN(customer_id)) {
-      return res.status(400).json({ error: "Invalid customer ID." });
-    }
-
-    // Check if customer exists
-    const checkQuery = `SELECT * FROM customers WHERE customer_id = $1`;
-    const existingCustomer = await db.query(checkQuery, [customer_id]);
-
-    if (existingCustomer.rows.length === 0) {
-      return res.status(404).json({ error: "Customer not found." });
-    }
-
-    // Prepare the fields to update
-    const updateFields = [];
-    const values = [];
-
-    if (fname) {
-      updateFields.push(`fname = $${values.length + 1}`);
-      values.push(fname);
-    }
-    if (lname) {
-      updateFields.push(`lname = $${values.length + 1}`);
-      values.push(lname);
-    }
-    if (email_address) {
-      updateFields.push(`email_address = $${values.length + 1}`);
-      values.push(email_address);
-    }
-    if (phone_number) {
-      updateFields.push(`phone_number = $${values.length + 1}`);
-      values.push(phone_number);
-    }
-
-    if (updateFields.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "At least one field is required to update." });
-    }
-
-    // Add customer_id as the last parameter
-    values.push(customer_id);
-
-    const updateQuery = `
-      UPDATE customers
-      SET ${updateFields.join(", ")}
-      WHERE customer_id = $${values.length}
-      RETURNING customer_id, fname, lname, email_address, phone_number;
-    `;
-
-    // Execute the update query
-    const result = await db.query(updateQuery, values);
-
-    res.status(200).json({
-      message: "Customer updated successfully.",
-      customer: result.rows[0], // Fix: Returning correct data
-    });
-  } catch (error) {
-    console.error("Error updating customer:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-//************************************************/*/
-//********* Route to change customer info *********//
-//************************************************/*/
-
-app.patch("/update_customer/:customer_id", async (req, res) => {
-  try {
-    const customer_id = parseInt(req.params.customer_id);
-    const { fname, lname, email_address, phone_number } = req.body;
-    console.log(customer_id);
-    if (isNaN(customer_id)) {
-      return res.status(400).json({ error: "Invalid customer ID." });
-    }
-
-    // Check if customer exists
-    const checkQuery = `SELECT * FROM customers WHERE customer_id = $1`;
-    const existingCustomer = await db.query(checkQuery, [customer_id]);
-
-    if (existingCustomer.rows.length === 0) {
-      return res.status(404).json({ error: "Customer not found." });
-    }
-
-    // Prepare the fields to update
-    const updateFields = [];
-    const values = [];
-
-    if (fname) {
-      updateFields.push(`fname = $${values.length + 1}`);
-      values.push(fname);
-    }
-    if (lname) {
-      updateFields.push(`lname = $${values.length + 1}`);
-      values.push(lname);
-    }
-    if (email_address) {
-      updateFields.push(`email_address = $${values.length + 1}`);
-      values.push(email_address);
-    }
-    if (phone_number) {
-      updateFields.push(`phone_number = $${values.length + 1}`);
-      values.push(phone_number);
-    }
-
-    if (updateFields.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "At least one field is required to update." });
-    }
-
-    // Add customer_id as the last parameter
-    values.push(customer_id);
-
-    const updateQuery = `
-      UPDATE customers
-      SET ${updateFields.join(", ")}
-      WHERE customer_id = $${values.length}
-      RETURNING customer_id, fname, lname, email_address, phone_number;
-    `;
-
-    // Execute the update query
-    const result = await db.query(updateQuery, values);
-
-    res.status(200).json({
-      message: "Customer updated successfully.",
-      customer: result.rows[0], // Fix: Returning correct data
-    });
-  } catch (error) {
-    console.error("Error updating customer:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
