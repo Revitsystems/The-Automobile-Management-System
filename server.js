@@ -475,31 +475,6 @@ app.patch("/update_mechanic/:mechanic_id", async (req, res) => {
 // Route to book a schedule// POST route for booking service schedule
 // Nodemailer transporter setup (example using Gmail)
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: "godsbrightc@gmail.com",
-    pass: "ftgh euhw jcdt eix", // Use environment variables for security
-  },
-});
-
-// Function to send email
-const sendEmail = async (recipientEmail, subject, message) => {
-  const mailOptions = {
-    from: "godsbrightc@gmail.com",
-    to: recipientEmail,
-    subject: subject,
-    text: message,
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log("Email sent successfully!");
-  } catch (error) {
-    console.error("Error sending email:", error);
-  }
-};
-
 // Route for booking a scheduleconst { DateTime } = require("luxon");
 
 app.post("/book_schedule", async (req, res) => {
@@ -541,7 +516,7 @@ app.post("/book_schedule", async (req, res) => {
 
     // Fetch the schedule from the database using the returned schedule_id
     const fetchQuery = `
-      SELECT schedule_id, customer_id, vehicle_id, service_type, service_date, status, date_created
+      SELECT schedule_id, customer_id, vehicle_id, service_type, service_date, date_created, reminder_sent
       FROM schedules WHERE schedule_id = $1;
     `;
     const fetchResult = await db.query(fetchQuery, [scheduleId]);
@@ -558,7 +533,109 @@ app.post("/book_schedule", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+// Email transporter setup
 
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: "godsbrightc@gmail.com",
+    pass: "reucfkkjsvphdlqo", // Use environment variables for security
+  },
+});
+const sendReminders = async () => {
+  try {
+    // Get today's date in UTC (YYYY-MM-DD)
+    const today = DateTime.utc().toISODate();
+
+    // Fetch schedules where reminder_sent is false and service_date matches today
+    const query = `
+      SELECT schedule_id, customer_id, vehicle_id, service_type, service_date
+      FROM schedules
+      WHERE reminder_sent = false AND service_date::date = $1;
+    `;
+    const { rows: schedules } = await db.query(query, [today]);
+
+    if (schedules.length === 0) {
+      console.log("No reminders to send today.");
+      return;
+    }
+
+    for (const schedule of schedules) {
+      const {
+        schedule_id,
+        customer_id,
+        vehicle_id,
+        service_type,
+        service_date,
+      } = schedule;
+
+      // Fetch customer email
+      const customerQuery =
+        "SELECT email_address FROM customers WHERE customer_id = $1";
+      const customerResult = await db.query(customerQuery, [customer_id]);
+      const customerEmail = customerResult.rows[0]?.email_address;
+
+      if (!customerEmail) {
+        console.log(`No email found for customer ID: ${customer_id}`);
+        continue;
+      }
+
+      // Fetch vehicle details (make, model) using vehicle_id from the schedule
+      const vehicleQuery = `SELECT make, model FROM vehicles WHERE vehicle_id = $1;`;
+      const vehicleResult = await db.query(vehicleQuery, [vehicle_id]);
+      const { make, model } = vehicleResult.rows[0] || {}; // Handle undefined case
+
+      if (!make || !model) {
+        console.log(`No vehicle found for vehicle ID: ${vehicle_id}`);
+        continue;
+      }
+
+      // Prepare email message
+      const emailMessage = `
+        Hello,
+        This is a reminder that your ${service_type} service appointment for your ${make} ${model} is scheduled for today (${service_date}).
+        Please be ready for the service.
+
+        Thank you,
+        Auto Care Manager Team.
+      `;
+
+      // Send email
+      await transporter.sendMail({
+        from: "your-email@gmail.com",
+        to: customerEmail,
+        subject: "Service Appointment Reminder",
+        text: emailMessage,
+      });
+
+      console.log(
+        `Reminder sent to ${customerEmail} for schedule ID: ${schedule_id}`
+      );
+
+      // Update reminder_sent to true
+      const updateQuery = `
+        UPDATE schedules
+        SET reminder_sent = true
+        WHERE schedule_id = $1;
+      `;
+      await db.query(updateQuery, [schedule_id]);
+
+      console.log(
+        `Updated reminder_sent to true for schedule ID: ${schedule_id}`
+      );
+    }
+  } catch (error) {
+    console.error("Error sending reminders:", error);
+  }
+};
+
+// Schedule job to run at 7 AM daily (UTC time)
+cron.schedule("0 7 * * *", async () => {
+  await sendReminders();
+  console.log("⏳ Scheduled job executed at 7 AM UTC.");
+});
+
+console.log("🚀 Reminder service is running...");
 //***************************************************/*/
 //********* Route to create new service log **********//
 //***************************************************/*/
