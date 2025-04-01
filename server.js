@@ -23,17 +23,24 @@ app.get("/car-list", (req, res) => {
   res.send(carsList);
 });
 
-// PostgreSQL connection
 const db = new pg.Client({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT || 5432,
+  connectionString:
+    "postgresql://postgres:PtNkpRZcHopJuNwutoCycXxppXKNFsdz@tramway.proxy.rlwy.net:40759/railway",
+  ssl: { rejectUnauthorized: false }, // Ensure SSL is properly configured
 });
+
 db.connect()
-  .then(() => console.log("Connected to PostgreSQL"))
-  .catch((err) => console.error("Database connection error:", err));
+  .then(() => console.log("✅ Connected to PostgreSQL"))
+  .catch((err) => {
+    console.error("❌ Database connection error:", err);
+    db.end(); // Close the connection if there's an error
+  });
+
+// Explicit error handling for the 'error' event
+db.on("error", (err) => {
+  console.error("❌ Unhandled error event:", err);
+  db.end(); // Close the connection if there's an unhandled error
+});
 //***************************************************************/*/
 //****** Route to handle every thing for the Customer table ******//
 //***************************************************************/*/
@@ -538,20 +545,24 @@ app.post("/book_schedule", async (req, res) => {
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "godsbrightc@gmail.com",
-    pass: "reucfkkjsvphdlqo", // Use environment variables for security
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS, // Use environment variables for security
   },
 });
+
+// 🚀 Function to Send Reminders
 const sendReminders = async () => {
   try {
-    // Get today's date in UTC (YYYY-MM-DD)
     const today = DateTime.utc().toISODate();
 
-    // Fetch schedules where reminder_sent is false and service_date matches today
+    // ✅ Optimized Query - Fetch all required details in one go
     const query = `
-      SELECT schedule_id, customer_id, vehicle_id, service_type, service_date
-      FROM schedules
-      WHERE reminder_sent = false AND service_date::date = $1;
+      SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
+             s.service_date, c.email_address, v.make, v.model
+      FROM schedules s
+      JOIN customers c ON s.customer_id = c.customer_id
+      JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+      WHERE s.reminder_sent = false AND s.service_date::date = $1;
     `;
     const { rows: schedules } = await db.query(query, [today]);
 
@@ -567,75 +578,87 @@ const sendReminders = async () => {
         vehicle_id,
         service_type,
         service_date,
+        email_address,
+        make,
+        model,
       } = schedule;
 
-      // Fetch customer email
-      const customerQuery =
-        "SELECT email_address FROM customers WHERE customer_id = $1";
-      const customerResult = await db.query(customerQuery, [customer_id]);
-      const customerEmail = customerResult.rows[0]?.email_address;
-
-      if (!customerEmail) {
+      if (!email_address) {
         console.log(`No email found for customer ID: ${customer_id}`);
         continue;
       }
-
-      // Fetch vehicle details (make, model) using vehicle_id from the schedule
-      const vehicleQuery = `SELECT make, model FROM vehicles WHERE vehicle_id = $1;`;
-      const vehicleResult = await db.query(vehicleQuery, [vehicle_id]);
-      const { make, model } = vehicleResult.rows[0] || {}; // Handle undefined case
 
       if (!make || !model) {
         console.log(`No vehicle found for vehicle ID: ${vehicle_id}`);
         continue;
       }
-
-      // Prepare email message
+      // 🎨 HTML Email Template
+      const emailHTML = `
+         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+           <div style="text-align: center;">
+             <img src="https://th.bing.com/th/id/OIF.smXTP9ZOOF1VbBPYJcQQHQ?w=231&h=180&c=7&r=0&o=5&pid=1.7" alt="Auto Care Manager Logo" style="max-width: 150px; margin-bottom: 10px;">
+           </div>
+           <h2 style="text-align: center; color: #2c3e50;">🔧 Service Appointment Reminder</h2>
+           <p style="font-size: 16px; color: #555;">Dear Customer,</p>
+           <p style="font-size: 16px; color: #555;">
+             This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>).
+           </p>
+           <p style="font-size: 16px; color: #555;"> 
+           Please be ready for the service.</p> 
+             <p style="font-size: 16px; color: #555;"> 
+            Thank you, <br> Auto Care Manager Team</p>
+           <div style="text-align: center; margin: 20px 0;">
+             <a href="https://yourwebsite.com/appointments" style="background: #3498db; color: white; padding: 12px 20px; text-decoration: none; font-size: 16px; border-radius: 5px;">View Appointment</a>
+           </div>
+           <p style="font-size: 14px; color: #888; text-align: center;">Thank you, <br> Auto Care Manager Team</p>
+         </div>
+       `;
       const emailMessage = `
         Hello,
-        This is a reminder that your ${service_type} service appointment for your ${make} ${model} is scheduled for today (${service_date}).
-        Please be ready for the service.
-
-        Thank you,
-        Auto Care Manager Team.
+        This is a reminder that your ${service_type} service appointment for your ${make} ${model} is scheduled for today ${service_date}.
+       
       `;
 
-      // Send email
-      await transporter.sendMail({
-        from: "your-email@gmail.com",
-        to: customerEmail,
-        subject: "Service Appointment Reminder",
-        text: emailMessage,
-      });
+      // ✅ Robust Error Handling for Email Sending
+      try {
+        await transporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: email_address,
+          subject: "Service Appointment Reminder",
+          html: emailHTML,
+        });
 
-      console.log(
-        `Reminder sent to ${customerEmail} for schedule ID: ${schedule_id}`
-      );
+        console.log(
+          `📧 Reminder sent to ${email_address} for schedule ID: ${schedule_id}`
+        );
 
-      // Update reminder_sent to true
-      const updateQuery = `
-        UPDATE schedules
-        SET reminder_sent = true
-        WHERE schedule_id = $1;
-      `;
-      await db.query(updateQuery, [schedule_id]);
+        // ✅ Update `reminder_sent` status
+        await db.query(
+          `UPDATE schedules SET reminder_sent = true WHERE schedule_id = $1`,
+          [schedule_id]
+        );
 
-      console.log(
-        `Updated reminder_sent to true for schedule ID: ${schedule_id}`
-      );
+        console.log(
+          `✅ Updated reminder_sent to true for schedule ID: ${schedule_id}`
+        );
+      } catch (err) {
+        console.error(
+          `❌ Failed to send email to ${email_address}:`,
+          err.message
+        );
+      }
     }
   } catch (error) {
     console.error("Error sending reminders:", error);
   }
 };
 
-// Schedule job to run at 7 AM daily (UTC time)
+// 🚀 Scheduled Job - Runs at 7 AM UTC Daily
 cron.schedule("0 7 * * *", async () => {
   await sendReminders();
   console.log("⏳ Scheduled job executed at 7 AM UTC.");
 });
 
-console.log("🚀 Reminder service is running...");
 //***************************************************/*/
 //********* Route to create new service log **********//
 //***************************************************/*/
