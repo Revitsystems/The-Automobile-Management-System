@@ -574,7 +574,7 @@ const sendReminders = async () => {
     // ✅ Optimized Query - Fetch all required details in one go
     const query = `
       SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
-             s.service_date, c.email_address, v.make, v.model
+             s.service_date, c.email_address, v.make, v.model v.color v.year
       FROM schedules s
       JOIN customers c ON s.customer_id = c.customer_id
       JOIN vehicles v ON s.vehicle_id = v.vehicle_id
@@ -617,7 +617,7 @@ const sendReminders = async () => {
            <h2 style="text-align: center; color: #2c3e50;">🔧 Service Appointment Reminder</h2>
            <p style="font-size: 16px; color: #555;">Dear Customer,</p>
            <p style="font-size: 16px; color: #555;">
-             This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>).
+             This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${year} ${color} ${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>).
            </p>
            <p style="font-size: 16px; color: #555;"> 
            Please be ready for the service.</p>
