@@ -40,6 +40,23 @@ db.on("error", (err) => {
   console.error("❌ Unhandled error event:", err);
   db.end(); // Close the connection if there's an unhandled error
 });
+
+// Health check route
+app.get("/health_check", async (req, res) => {
+  try {
+    const result = await db.query("SELECT NOW()");
+    res.status(200).json({
+      status: "OK",
+      db_time: result.rows[0].now,
+      message: "Database and server are running fine!",
+    });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ status: "ERROR", message: "Database issue detected!" });
+  }
+});
+
 //***************************************************************/*/
 //****** Route to handle every thing for the Customer table ******//
 //***************************************************************/*/
@@ -666,8 +683,6 @@ cron.schedule("*/5 * * * *", async () => {
     console.error("❌ Database keep-alive failed:", error);
   }
 });
-
-sendReminders();
 
 //***************************************************/*/
 //********* Route to create new service log **********//
