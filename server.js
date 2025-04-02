@@ -2,57 +2,55 @@ import express from "express";
 import bodyParser from "body-parser";
 import cors from "cors";
 import dotenv from "dotenv";
-import pg from "pg";
+import pkg from "pg";
 import { DateTime } from "luxon";
 import cron from "node-cron";
 import nodemailer from "nodemailer";
-dotenv.config(); // Load environment variables
-
+dotenv.config(); // Load environment variable
+const { Pool } = pkg;
 const app = express();
 const PORT = process.env.PORT || 5000;
 app.use(cors()); // Enable cross-origin requests
 app.use(bodyParser.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
 
-// Simple Test Route
-app.get("/", (req, res) => {
-  res.send("Welcome to Auto Care Manager API!");
-});
-
-app.get("/", (req, res) => {
-  res.send(carsList);
-});
-
-const db = new pg.Client({
+// Instantiate the connection pool
+const pool = new Pool({
+  // Changed from pg.Client to Pool and renamed db to pool
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // Ensure SSL is properly configured
+  // You can add pool configuration options here, e.g.:
+  // max: 20, // max number of clients in the pool
+  // idleTimeoutMillis: 30000, // how long a client is allowed to remain idle before being closed
+  // connectionTimeoutMillis: 2000, // how long to wait for a connection acquisition before timing out
 });
 
-db.connect()
-  .then(() => console.log("✅ Connected to PostgreSQL"))
-  .catch((err) => {
-    console.error("❌ Database connection error:", err);
-    db.end(); // Close the connection if there's an error
-  });
+// Check connection on startup (optional, pool connects lazily)
+pool
+  .query("SELECT NOW()")
+  .then(() => console.log("✅ Connected to PostgreSQL via Pool"))
+  .catch((err) =>
+    console.error("❌ Initial Pool connection check error:", err)
+  );
 
-// Explicit error handling for the 'error' event
-db.on("error", (err) => {
-  console.error("❌ Unhandled error event:", err);
-  db.end(); // Close the connection if there's an unhandled error
+// Listen for errors on idle clients in the pool
+pool.on("error", (err, client) => {
+  // Changed from db.on to pool.on
+  console.error("❌ Unexpected error on idle client in pool", err);
+  // Recommended to exit or handle robustly in production
+  // process.exit(-1); // Optional: exit if pool error is critical
 });
 
 // Health check route
-app.get("/health-check", async (req, res) => {
+app.get("/", async (req, res) => {
   try {
-    const result = await db.query("SELECT NOW()");
-    res.status(200).json({
-      status: "OK",
-      db_time: result.rows[0].now,
-      message: "Database and server are running fine!",
-    });
+    // Optional: Run a lightweight query to check pool status if desired
+    await pool.query("SELECT NOW()"); // Use pool.query
+    console.log("✅ Pool status check successful (via / route)");
+    res.send("Welcome to Auto Care Manager API! Pool is active.");
   } catch (error) {
-    res
-      .status(500)
-      .json({ status: "ERROR", message: "Database issue detected!" });
+    console.error("❌ Pool status check failed (via / route):", error);
+    // Send error even on the root path if DB is down
+    res.status(500).send("API is running, but database connection failed.");
   }
 });
 
@@ -83,9 +81,9 @@ app.post("/new_customer", async (req, res) => {
 
     // Check if the customer already exists using email or phone number
     const checkQuery = `
-        SELECT * FROM customers WHERE phone_number = $1 OR email_address = $2;
-        `;
-    const checkResult = await db.query(checkQuery, [
+          SELECT * FROM customers WHERE phone_number = $1 OR email_address = $2;
+          `;
+    const checkResult = await pool.query(checkQuery, [
       phone_number,
       email_address,
     ]);
@@ -109,9 +107,9 @@ app.post("/new_customer", async (req, res) => {
     console.log(customer);
     // Insert query
     const query = `
-        INSERT INTO customers (fname, lname, phone_number, email_address, date_created, time_created)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING customer_id, fname, lname, phone_number, email_address, date_created, time_created;
-      `;
+          INSERT INTO customers (fname, lname, phone_number, email_address, date_created, time_created)
+          VALUES ($1, $2, $3, $4, $5, $6) RETURNING customer_id, fname, lname, phone_number, email_address, date_created, time_created;
+        `;
 
     const values = [
       customer.fname,
@@ -123,7 +121,7 @@ app.post("/new_customer", async (req, res) => {
     ];
     console.log(values);
     // Query execution
-    const result = await db.query(query, values);
+    const result = await pool.query(query, values);
     // Sending a successful response
     res.status(201).json({
       message: "Customer added successfully",
@@ -148,7 +146,7 @@ app.patch("/update_customer/:customer_id", async (req, res) => {
 
     // Check if customer exists
     const checkQuery = `SELECT * FROM customers WHERE customer_id = $1`;
-    const existingCustomer = await db.query(checkQuery, [customer_id]);
+    const existingCustomer = await pool.query(checkQuery, [customer_id]);
 
     if (existingCustomer.rows.length === 0) {
       return res.status(404).json({ error: "Customer not found." });
@@ -185,14 +183,14 @@ app.patch("/update_customer/:customer_id", async (req, res) => {
     values.push(customer_id);
 
     const updateQuery = `
-      UPDATE customers
-      SET ${updateFields.join(", ")}
-      WHERE customer_id = $${values.length}
-      RETURNING customer_id, fname, lname, email_address, phone_number;
-    `;
+        UPDATE customers
+        SET ${updateFields.join(", ")}
+        WHERE customer_id = $${values.length}
+        RETURNING customer_id, fname, lname, email_address, phone_number;
+      `;
 
     // Execute the update query
-    const result = await db.query(updateQuery, values);
+    const result = await pool.query(updateQuery, values);
 
     res.status(200).json({
       message: "Customer updated successfully.",
@@ -226,7 +224,7 @@ app.post("/new_car", async (req, res) => {
 
     // Check if the customer already exists using email or phone number
     const checkQuery = `SELECT * FROM vehicles WHERE vin = $1;`; // Use the correct table
-    const checkResult = await db.query(checkQuery, [vin]);
+    const checkResult = await pool.query(checkQuery, [vin]);
 
     if (checkResult.rows.length > 0) {
       // Customer exists, return existing customer details
@@ -265,10 +263,10 @@ app.post("/new_car", async (req, res) => {
 
     // Insert query for the vehicles table
     const query = `
-  INSERT INTO vehicles (customer_id, make, model, year, license_plate, vin, color, date_created, time_created)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-  RETURNING vehicle_id, customer_id, make, model, year, license_plate, vin, color, date_created, time_created;
-  `;
+    INSERT INTO vehicles (customer_id, make, model, year, license_plate, vin, color, date_created, time_created)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING vehicle_id, customer_id, make, model, year, license_plate, vin, color, date_created, time_created;
+    `;
 
     const values = [
       car.customer_id,
@@ -282,7 +280,7 @@ app.post("/new_car", async (req, res) => {
       car.time_created,
     ];
     // Query execution
-    const result = await db.query(query, values);
+    const result = await pool.query(query, values);
     // Sending a successful response
     res.status(201).json({
       message: "car added successfully",
@@ -306,7 +304,7 @@ app.patch("/update_vehicle/:vehicle_id", async (req, res) => {
 
     // Check if customer exists
     const checkQuery = `SELECT * FROM vehicles WHERE vehicle_id = $1`;
-    const existingVehicle = await db.query(checkQuery, [vehicle_id]);
+    const existingVehicle = await pool.query(checkQuery, [vehicle_id]);
 
     if (existingVehicle.rows.length === 0) {
       return res.status(404).json({ error: "Customer not found." });
@@ -351,14 +349,14 @@ app.patch("/update_vehicle/:vehicle_id", async (req, res) => {
     values.push(vehicle_id);
 
     const updateQuery = `
-      UPDATE vehicles
-      SET ${updateFields.join(", ")}
-      WHERE vehicle_id = $${values.length}
-      RETURNING vehicle_id, customer_id, make, model, year, license_plate, vin, color;
-    `;
+        UPDATE vehicles
+        SET ${updateFields.join(", ")}
+        WHERE vehicle_id = $${values.length}
+        RETURNING vehicle_id, customer_id, make, model, year, license_plate, vin, color;
+      `;
 
     // Execute the update query
-    const result = await db.query(updateQuery, values);
+    const result = await pool.query(updateQuery, values);
 
     res.status(200).json({
       message: "Vehicle updated successfully.",
@@ -387,10 +385,10 @@ app.post("/add_mechanic", async (req, res) => {
 
     // Check if mechanic already exists (based on email or phone)
     const checkQuery = `
-      SELECT * FROM mechanics 
-      WHERE email_address = $1 OR phone_number = $2;
-    `;
-    const existingMechanic = await db.query(checkQuery, [
+        SELECT * FROM mechanics 
+        WHERE email_address = $1 OR phone_number = $2;
+      `;
+    const existingMechanic = await pool.query(checkQuery, [
       email_address,
       phone_number,
     ]);
@@ -404,13 +402,13 @@ app.post("/add_mechanic", async (req, res) => {
 
     // Insert new mechanic
     const insertQuery = `
-      INSERT INTO mechanics (fname, lname, email_address, phone_number) 
-      VALUES ($1, $2, $3, $4) 
-      RETURNING mechanic_id, fname, lname, email_address, phone_number;
-    `;
+        INSERT INTO mechanics (fname, lname, email_address, phone_number) 
+        VALUES ($1, $2, $3, $4) 
+        RETURNING mechanic_id, fname, lname, email_address, phone_number;
+      `;
     const values = [fname, lname, email_address, phone_number];
 
-    const result = await db.query(insertQuery, values);
+    const result = await pool.query(insertQuery, values);
 
     res.status(201).json({
       message: "Mechanic added successfully.",
@@ -434,7 +432,7 @@ app.patch("/update_mechanic/:mechanic_id", async (req, res) => {
 
     // Check if customer exists
     const checkQuery = `SELECT * FROM mechanics WHERE mechanic_id = $1`;
-    const existingMechanic = await db.query(checkQuery, [mechanic_id]);
+    const existingMechanic = await pool.query(checkQuery, [mechanic_id]);
 
     if (existingMechanic.rows.length === 0) {
       return res.status(404).json({ error: "Mechanic not found." });
@@ -471,14 +469,14 @@ app.patch("/update_mechanic/:mechanic_id", async (req, res) => {
     values.push(mechanic_id);
 
     const updateQuery = `
-      UPDATE mechanics
-      SET ${updateFields.join(", ")}
-      WHERE mechanic_id = $${values.length}
-      RETURNING mechanic_id, fname, lname, email_address, phone_number;
-    `;
+        UPDATE mechanics
+        SET ${updateFields.join(", ")}
+        WHERE mechanic_id = $${values.length}
+        RETURNING mechanic_id, fname, lname, email_address, phone_number;
+      `;
 
     // Execute the update query
-    const result = await db.query(updateQuery, values);
+    const result = await pool.query(updateQuery, values);
 
     res.status(200).json({
       message: "Mechanic updated successfully.",
@@ -522,14 +520,14 @@ app.post("/book_schedule", async (req, res) => {
 
     // Insert the schedule into the database
     const insertQuery = `
-      INSERT INTO schedules (customer_id, vehicle_id, service_type, service_date)
-      VALUES ($1, $2, $3, $4)
-      RETURNING schedule_id;
-    `;
+        INSERT INTO schedules (customer_id, vehicle_id, service_type, service_date)
+        VALUES ($1, $2, $3, $4)
+        RETURNING schedule_id;
+      `;
     const insertValues = [customer_id, vehicle_id, service_type, formattedDate];
 
     // Execute the insert query
-    const insertResult = await db.query(insertQuery, insertValues);
+    const insertResult = await pool.query(insertQuery, insertValues);
     const scheduleId = insertResult.rows[0].schedule_id;
 
     if (!scheduleId) {
@@ -538,10 +536,10 @@ app.post("/book_schedule", async (req, res) => {
 
     // Fetch the schedule from the database using the returned schedule_id
     const fetchQuery = `
-      SELECT schedule_id, customer_id, vehicle_id, service_type, service_date, date_created, reminder_sent
-      FROM schedules WHERE schedule_id = $1;
-    `;
-    const fetchResult = await db.query(fetchQuery, [scheduleId]);
+        SELECT schedule_id, customer_id, vehicle_id, service_type, service_date, date_created, reminder_sent
+        FROM schedules WHERE schedule_id = $1;
+      `;
+    const fetchResult = await pool.query(fetchQuery, [scheduleId]);
     const scheduleDetails = fetchResult.rows[0];
     console.log("Raw service_date from DB:", scheduleDetails.service_date);
 
@@ -572,14 +570,14 @@ const sendReminders = async () => {
 
     // ✅ Optimized Query - Fetch all required details in one go
     const query = `
-      SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
-             s.service_date, c.email_address, v.make, v.model, v.year, v.color
-      FROM schedules s
-      JOIN customers c ON s.customer_id = c.customer_id
-      JOIN vehicles v ON s.vehicle_id = v.vehicle_id
-      WHERE s.reminder_sent = false AND s.service_date::date = $1;
-    `;
-    const { rows: schedules } = await db.query(query, [today]);
+        SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
+              s.service_date, c.email_address, v.make, v.model, v.year, v.color
+        FROM schedules s
+        JOIN customers c ON s.customer_id = c.customer_id
+        JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+        WHERE s.reminder_sent = false AND s.service_date::date = $1;
+      `;
+    const { rows: schedules } = await pool.query(query, [today]);
 
     if (schedules.length === 0) {
       console.log("No reminders to send today.");
@@ -611,28 +609,23 @@ const sendReminders = async () => {
       }
       // 🎨 HTML Email Template
       const emailHTML = `
-         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-           <div style="text-align: center;">
-             <img src="https://th.bing.com/th/id/OIF.smXTP9ZOOF1VbBPYJcQQHQ?w=231&h=180&c=7&r=0&o=5&pid=1.7" alt="Auto Care Manager Logo" style="max-width: 150px; margin-bottom: 10px;">
-           </div>
-           <h2 style="text-align: center; color: #2c3e50;">🔧 Service Appointment Reminder</h2>
-           <p style="font-size: 16px; color: #555;">Dear Customer,</p>
-           <p style="font-size: 16px; color: #555;">
-             This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${color} ${year} ${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>). 
-           </p> 
-           <p style="font-size: 16px; color: #555;"> 
-           Please be ready for the service.</p>
-           <div style="text-align: center; margin: 20px 0;">
-             <a href="https://yourwebsite.com/appointments" style="background: #3498db; color: white; padding: 12px 20px; text-decoration: none; font-size: 16px; border-radius: 5px;">View Appointment</a>
-           </div>
-           <p style="font-size: 14px; color: #888; text-align: center;">Thank you, <br> Auto Care Manager Team</p>
-         </div>
-       `;
-      const emailMessage = `
-        Hello,
-        This is a reminder that your ${service_type} service appointment for your ${make} ${model} is scheduled for today ${service_date}.
-       
-      `;
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+            <div style="text-align: center;">
+              <img src="https://th.bing.com/th/id/OIF.smXTP9ZOOF1VbBPYJcQQHQ?w=231&h=180&c=7&r=0&o=5&pid=1.7" alt="Auto Care Manager Logo" style="max-width: 150px; margin-bottom: 10px;">
+            </div>
+            <h2 style="text-align: center; color: #2c3e50;">🔧 Service Appointment Reminder</h2>
+            <p style="font-size: 16px; color: #555;">Dear Customer,</p>
+            <p style="font-size: 16px; color: #555;">
+              This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${color} ${year} ${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>). 
+            </p> 
+            <p style="font-size: 16px; color: #555;"> 
+            Please be ready for the service.</p>
+            <div style="text-align: center; margin: 20px 0;">
+              <a href="https://yourwebsite.com/appointments" style="background: #3498db; color: white; padding: 12px 20px; text-decoration: none; font-size: 16px; border-radius: 5px;">View Appointment</a>
+            </div>
+            <p style="font-size: 14px; color: #888; text-align: center;">Thank you, <br> Auto Care Manager Team</p>
+          </div>
+        `;
 
       // ✅ Robust Error Handling for Email Sending
       try {
@@ -683,7 +676,6 @@ cron.schedule("*/5 * * * *", async () => {
     console.error("❌ Database keep-alive failed:", error);
   }
 });
-
 //***************************************************/*/
 //********* Route to create new service log **********//
 //***************************************************/*/
@@ -711,11 +703,11 @@ app.post("/create_service_log", async (req, res) => {
 
     // Insert into service_logs table
     const query = `
-      INSERT INTO service_records 
-      (vehicle_id, service_type, service_date, service_details, mechanic_id, parts_replaced)
-      VALUES ($1, $2, $3, $4, $5, $6) 
-      RETURNING service_id, vehicle_id, service_type, service_date, service_details, mechanic_id, parts_replaced;
-    `;
+        INSERT INTO service_records 
+        (vehicle_id, service_type, service_date, service_details, mechanic_id, parts_replaced)
+        VALUES ($1, $2, $3, $4, $5, $6) 
+        RETURNING service_id, vehicle_id, service_type, service_date, service_details, mechanic_id, parts_replaced;
+      `;
 
     const values = [
       vehicle_id,
@@ -726,7 +718,7 @@ app.post("/create_service_log", async (req, res) => {
       parts_replaced,
     ];
 
-    const result = await db.query(query, values);
+    const result = await pool.query(query, values);
 
     res.status(201).json({
       message: "Service log created successfully",
@@ -741,15 +733,15 @@ app.post("/create_service_log", async (req, res) => {
 // Function to get the count of all entities
 const getMaxCounts = async () => {
   const query = `
-    SELECT 
-      (SELECT COUNT(*) FROM customers) AS max_customers,
-      (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
-      (SELECT COUNT(*) FROM service_records) AS max_service_records,
-      (SELECT COUNT(*) FROM mechanics) AS max_mechanics;
-  `;
+      SELECT 
+        (SELECT COUNT(*) FROM customers) AS max_customers,
+        (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
+        (SELECT COUNT(*) FROM service_records) AS max_service_records,
+        (SELECT COUNT(*) FROM mechanics) AS max_mechanics;
+    `;
 
   try {
-    const result = await db.query(query);
+    const result = await pool.query(query);
     return result.rows[0]; // Returns an object with counts
   } catch (error) {
     console.error("Error fetching max counts:", error);
