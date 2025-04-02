@@ -670,7 +670,7 @@ cron.schedule("0 7 * * *", async () => {
 cron.schedule("*/5 * * * *", async () => {
   try {
     console.log("🔄 Running database keep-alive query...");
-    await db.query("SELECT NOW()"); // Simple query to prevent sleeping
+    await pool.query("SELECT NOW()"); // Simple query to prevent sleeping
     console.log("✅ Database is awake!");
   } catch (error) {
     console.error("❌ Database keep-alive failed:", error);
