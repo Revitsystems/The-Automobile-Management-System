@@ -573,12 +573,12 @@ const sendReminders = async () => {
 
     // ✅ Optimized Query - Fetch all required details in one go
     const query = `
-      SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
-             s.service_date, c.email_address, v.make, v.model v.color v.year
-      FROM schedules s
-      JOIN customers c ON s.customer_id = c.customer_id
-      JOIN vehicles v ON s.vehicle_id = v.vehicle_id
-      WHERE s.reminder_sent = false AND s.service_date::date = $1;
+    SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
+           s.service_date, c.email_address, v.make, v.model, v.color, v.year
+    FROM schedules s
+    JOIN customers c ON s.customer_id = c.customer_id
+    JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+    WHERE s.reminder_sent = false AND s.service_date::date = $1;
     `;
     const { rows: schedules } = await db.query(query, [today]);
 
