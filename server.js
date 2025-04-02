@@ -9,7 +9,7 @@ import nodemailer from "nodemailer";
 dotenv.config(); // Load environment variables
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 3000;
 
 app.use(cors()); // Enable cross-origin requests
 app.use(bodyParser.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
@@ -667,6 +667,8 @@ cron.schedule("*/5 * * * *", async () => {
   }
 });
 
+sendReminders();
+
 //***************************************************/*/
 //********* Route to create new service log **********//
 //***************************************************/*/
@@ -721,8 +723,6 @@ app.post("/create_service_log", async (req, res) => {
   }
 });
 
-// Start server
-const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`🚀 Server running on port ${port}`);
 });
