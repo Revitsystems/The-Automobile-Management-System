@@ -24,8 +24,7 @@ app.get("/car-list", (req, res) => {
 });
 
 const db = new pg.Client({
-  connectionString:
-    "postgresql://postgres:PtNkpRZcHopJuNwutoCycXxppXKNFsdz@tramway.proxy.rlwy.net:40759/railway",
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // Ensure SSL is properly configured
 });
 
@@ -657,6 +656,17 @@ const sendReminders = async () => {
 cron.schedule("0 7 * * *", async () => {
   await sendReminders();
   console.log("⏳ Scheduled job executed at 7 AM UTC.");
+});
+
+// 🔄 Cron job to keep the database awake every 5 minutes
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    console.log("🔄 Running database keep-alive query...");
+    await db.query("SELECT NOW()"); // Simple query to prevent sleeping
+    console.log("✅ Database is awake!");
+  } catch (error) {
+    console.error("❌ Database keep-alive failed:", error);
+  }
 });
 
 //***************************************************/*/
