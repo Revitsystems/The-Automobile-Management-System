@@ -596,6 +596,8 @@ const sendReminders = async () => {
         email_address,
         make,
         model,
+        color,
+        year,
       } = schedule;
 
       if (!email_address) {
@@ -671,7 +673,7 @@ cron.schedule("0 7 * * *", async () => {
   await sendReminders();
   console.log("⏳ Scheduled job executed at 7 AM UTC.");
 });
-
+sendReminders();
 // 🔄 Cron job to keep the database awake every 5 minutes
 cron.schedule("*/5 * * * *", async () => {
   try {
@@ -733,6 +735,35 @@ app.post("/create_service_log", async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating service log:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Function to get the count of all entities
+const getMaxCounts = async () => {
+  const query = `
+    SELECT 
+      (SELECT COUNT(*) FROM customers) AS max_customers,
+      (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
+      (SELECT COUNT(*) FROM service_records) AS max_service_records,
+      (SELECT COUNT(*) FROM mechanics) AS max_mechanics;
+  `;
+
+  try {
+    const result = await db.query(query);
+    return result.rows[0]; // Returns an object with counts
+  } catch (error) {
+    console.error("Error fetching max counts:", error);
+    throw error;
+  }
+};
+
+// API endpoint to get max counts
+app.get("/api/max-counts", async (req, res) => {
+  try {
+    const counts = await getMaxCounts();
+    res.json(counts);
+  } catch (error) {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
