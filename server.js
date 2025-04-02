@@ -9,8 +9,7 @@ import nodemailer from "nodemailer";
 dotenv.config(); // Load environment variables
 
 const app = express();
-const port = process.env.PORT || 3000;
-
+const PORT = process.env.PORT || 5000;
 app.use(cors()); // Enable cross-origin requests
 app.use(bodyParser.urlencoded({ extended: true })); // For parsing application/x-www-form-urlencoded
 
@@ -19,7 +18,7 @@ app.get("/", (req, res) => {
   res.send("Welcome to Auto Care Manager API!");
 });
 
-app.get("/car-list", (req, res) => {
+app.get("/", (req, res) => {
   res.send(carsList);
 });
 
@@ -42,7 +41,7 @@ db.on("error", (err) => {
 });
 
 // Health check route
-app.get("/health_check", async (req, res) => {
+app.get("/health-check", async (req, res) => {
   try {
     const result = await db.query("SELECT NOW()");
     res.status(200).json({
@@ -573,12 +572,12 @@ const sendReminders = async () => {
 
     // ✅ Optimized Query - Fetch all required details in one go
     const query = `
-    SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
-           s.service_date, c.email_address, v.make, v.model, v.color, v.year
-    FROM schedules s
-    JOIN customers c ON s.customer_id = c.customer_id
-    JOIN vehicles v ON s.vehicle_id = v.vehicle_id
-    WHERE s.reminder_sent = false AND s.service_date::date = $1;
+      SELECT s.schedule_id, s.customer_id, s.vehicle_id, s.service_type, 
+             s.service_date, c.email_address, v.make, v.model, v.year, v.color
+      FROM schedules s
+      JOIN customers c ON s.customer_id = c.customer_id
+      JOIN vehicles v ON s.vehicle_id = v.vehicle_id
+      WHERE s.reminder_sent = false AND s.service_date::date = $1;
     `;
     const { rows: schedules } = await db.query(query, [today]);
 
@@ -617,8 +616,8 @@ const sendReminders = async () => {
            <h2 style="text-align: center; color: #2c3e50;">🔧 Service Appointment Reminder</h2>
            <p style="font-size: 16px; color: #555;">Dear Customer,</p>
            <p style="font-size: 16px; color: #555;">
-             This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${year} ${color} ${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>).
-           </p>
+             This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${color} ${year} ${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>). 
+           </p> 
            <p style="font-size: 16px; color: #555;"> 
            Please be ready for the service.</p>
            <div style="text-align: center; margin: 20px 0;">
@@ -738,6 +737,7 @@ app.post("/create_service_log", async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
