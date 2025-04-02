@@ -673,7 +673,6 @@ cron.schedule("0 7 * * *", async () => {
   await sendReminders();
   console.log("⏳ Scheduled job executed at 7 AM UTC.");
 });
-sendReminders();
 // 🔄 Cron job to keep the database awake every 5 minutes
 cron.schedule("*/5 * * * *", async () => {
   try {
