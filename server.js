@@ -603,9 +603,7 @@ const sendReminders = async () => {
              This is a reminder that your <strong>${service_type}</strong> service appointment for your <strong>${make} ${model}</strong> is scheduled for today (<strong>${service_date}</strong>).
            </p>
            <p style="font-size: 16px; color: #555;"> 
-           Please be ready for the service.</p> 
-             <p style="font-size: 16px; color: #555;"> 
-            Thank you, <br> Auto Care Manager Team</p>
+           Please be ready for the service.</p>
            <div style="text-align: center; margin: 20px 0;">
              <a href="https://yourwebsite.com/appointments" style="background: #3498db; color: white; padding: 12px 20px; text-decoration: none; font-size: 16px; border-radius: 5px;">View Appointment</a>
            </div>
