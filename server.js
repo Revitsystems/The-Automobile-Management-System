@@ -39,15 +39,16 @@ pool.on("error", (err, client) => {
   // Recommended to exit or handle robustly in production
   // process.exit(-1); // Optional: exit if pool error is critical
 });
-
 // Health check route
 app.get("/", async (req, res) => {
   try {
+    const counts = await getMaxCounts();
+    res.json(counts);
     // Optional: Run a lightweight query to check pool status if desired
     await pool.query("SELECT NOW()"); // Use pool.query
     console.log("✅ Pool status check successful (via / route)");
-    res.send("Welcome to Auto Care Manager API! Pool is active.");
   } catch (error) {
+    res.status(500).json({ error: "Internal Server Error" });
     console.error("❌ Pool status check failed (via / route):", error);
     // Send error even on the root path if DB is down
     res.status(500).send("API is running, but database connection failed.");
@@ -738,13 +739,14 @@ app.post("/create_service_log", async (req, res) => {
 // Function to get the count of all entities
 const getMaxCounts = async () => {
   const query = `
-      SELECT 
-        (SELECT COUNT(*) FROM customers) AS max_customers,
-        (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
-        (SELECT COUNT(*) FROM service_records) AS max_service_records,
-        (SELECT COUNT(*) FROM mechanics) AS max_mechanics,
-        (SELECT COUNT(*) FROM schedules) AS max_schedules;
-    `;
+  SELECT 
+  (SELECT COUNT(*) FROM customers) AS max_customers,
+  (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
+  (SELECT COUNT(*) FROM service_records) AS max_service_records,
+  (SELECT COUNT(*) FROM mechanics) AS max_mechanics,
+  (SELECT COUNT(*) FROM schedules) AS max_schedules;
+
+`;
 
   try {
     const result = await pool.query(query);
@@ -754,16 +756,6 @@ const getMaxCounts = async () => {
     throw error;
   }
 };
-
-// API endpoint to get max counts
-app.get("/api/max-counts", async (req, res) => {
-  try {
-    const counts = await getMaxCounts();
-    res.json(counts);
-  } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
 
 // Start server
 app.listen(PORT, () => {
