@@ -680,10 +680,6 @@ cron.schedule("*/5 * * * *", async () => {
     console.error("❌ Database keep-alive failed:", error);
   }
 });
-cron.schedule("0 15 * * *", async () => {
-  await sendReminders();
-  console.log("⏳ Scheduled job executed at 15:00 UTC.");
-});
 
 //***************************************************/*/
 //********* Route to create new service log **********//
