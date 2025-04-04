@@ -641,7 +641,7 @@ const sendReminders = async () => {
         );
 
         // ✅ Update `reminder_sent` status
-        await db.query(
+        await pool.query(
           `UPDATE schedules SET reminder_sent = true WHERE schedule_id = $1`,
           [schedule_id]
         );
@@ -663,8 +663,12 @@ const sendReminders = async () => {
 
 // 🚀 Scheduled Job - Runs at 7 AM UTC Daily
 cron.schedule("0 7 * * *", async () => {
-  await sendReminders();
-  console.log("⏳ Scheduled job executed at 7 AM UTC.");
+  try {
+    await sendReminders();
+    console.log("✅ Reminder sent successfully at 7 AM WAT.");
+  } catch (error) {
+    console.error("❌ Failed to send reminders:", error);
+  }
 });
 // 🔄 Cron job to keep the database awake every 5 minutes
 cron.schedule("*/5 * * * *", async () => {
@@ -676,6 +680,11 @@ cron.schedule("*/5 * * * *", async () => {
     console.error("❌ Database keep-alive failed:", error);
   }
 });
+cron.schedule("0 15 * * *", async () => {
+  await sendReminders();
+  console.log("⏳ Scheduled job executed at 15:00 UTC.");
+});
+
 //***************************************************/*/
 //********* Route to create new service log **********//
 //***************************************************/*/
