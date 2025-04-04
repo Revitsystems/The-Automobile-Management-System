@@ -743,6 +743,7 @@ const getMaxCounts = async () => {
         (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
         (SELECT COUNT(*) FROM service_records) AS max_service_records,
         (SELECT COUNT(*) FROM mechanics) AS max_mechanics;
+        (SELECT COUNT(*) FROM schedules) AS max_mechanics;
     `;
 
   try {
