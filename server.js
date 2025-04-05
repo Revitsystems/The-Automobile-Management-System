@@ -662,15 +662,6 @@ const sendReminders = async () => {
   }
 };
 
-// 🚀 Scheduled Job - Runs at 7 AM UTC Daily
-cron.schedule("0 13 * * *", async () => {
-  try {
-    await sendReminders();
-    console.log("✅ Reminder sent successfully at 7 AM WAT.");
-  } catch (error) {
-    console.error("❌ Failed to send reminders:", error);
-  }
-});
 cron.schedule("0 7 * * *", async () => {
   try {
     await sendReminders();
