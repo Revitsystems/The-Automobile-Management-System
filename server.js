@@ -240,6 +240,30 @@ app.get("/customers/:identifier", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+app.get("/customers/:customerId/vehicles", async (req, res) => {
+  const customerId = req.params.customerId;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM vehicles WHERE customer_id = $1",
+      [customerId]
+    );
+    const vehicles = result.rows;
+
+    if (vehicles.length > 0) {
+      res.status(200).json(vehicles);
+    } else {
+      res
+        .status(404)
+        .json({ message: `No vehicles found for customer ID: ${customerId}` });
+    }
+  } catch (error) {
+    console.error("Error fetching customer vehicles:", error);
+    res.status(500).json({ error: "Failed to retrieve customer vehicles" });
+  }
+});
+
 //****************************************************************/*/
 //****** Route to handle every thing for the vehicle table *******//
 //****************************************************************/*/
