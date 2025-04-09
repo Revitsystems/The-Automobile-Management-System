@@ -38,20 +38,65 @@ pool.on("error", (err, client) => {
   console.error("❌ Unexpected error on idle client in pool", err);
   // Recommended to exit or handle robustly in production
   // process.exit(-1); // Optional: exit if pool error is critical
-});
-// Health check route
+}); //
+//
+//  Root route: Health check + counts + customers with vehicles
 app.get("/", async (req, res) => {
   try {
-    const counts = await getMaxCounts();
-    res.json(counts);
-    // Optional: Run a lightweight query to check pool status if desired
-    await pool.query("SELECT NOW()"); // Use pool.query
+    // Run lightweight query to confirm DB connection
+    await pool.query("SELECT NOW()");
     console.log("✅ Pool status check successful (via / route)");
+
+    // Get counts (assuming it's a separate function)
+    const counts = await getMaxCounts();
+
+    // Get customer + vehicle data
+    const customerVehicleResult = await pool.query(`
+      SELECT 
+        c.fname,
+        c.lname,
+        c.phone,
+        c.email,
+        v.name AS vehicle_name,
+        v.model AS vehicle_model,
+        v.year AS vehicle_year
+      FROM customers c
+      JOIN vehicles v ON v.customer_id = c.id
+    `);
+
+    res.json({
+      status: "API is running",
+      counts,
+      customersWithVehicles: customerVehicleResult.rows,
+    });
   } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
-    console.error("❌ Pool status check failed (via / route):", error);
-    // Send error even on the root path if DB is down
-    res.status(500).send("API is running, but database connection failed.");
+    console.error("❌ Error in / route:", error);
+    res.status(500).json({
+      error: "Internal Server Error",
+      message: "API is running, but database connection failed.",
+    });
+  }
+});
+
+// API to get customers and their vehicles
+app.get("/api/customers-with-vehicles", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        c.fname,
+        c.lname,
+        c.phone,
+        c.email,
+        v.name AS vehicle_name,
+        v.model AS vehicle_model,
+        v.year AS vehicle_year
+      FROM customers c
+      JOIN vehicles v ON v.customer_id = c.id
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("Error fetching data:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -738,14 +783,14 @@ app.post("/create_service_log", async (req, res) => {
 // Function to get the count of all entities
 const getMaxCounts = async () => {
   const query = `
-  SELECT 
-  (SELECT COUNT(*) FROM customers) AS max_customers,
-  (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
-  (SELECT COUNT(*) FROM service_records) AS max_service_records,
-  (SELECT COUNT(*) FROM mechanics) AS max_mechanics,
-  (SELECT COUNT(*) FROM schedules) AS max_schedules;
+    SELECT 
+    (SELECT COUNT(*) FROM customers) AS max_customers,
+    (SELECT COUNT(*) FROM vehicles) AS max_vehicles,
+    (SELECT COUNT(*) FROM service_records) AS max_service_records,
+    (SELECT COUNT(*) FROM mechanics) AS max_mechanics,
+    (SELECT COUNT(*) FROM schedules) AS max_schedules;
 
-`;
+  `;
 
   try {
     const result = await pool.query(query);
