@@ -283,7 +283,6 @@ app.post("/new_vehicle", async (req, res) => {
       date_created,
       time_created,
     } = req.body;
-
     // Check if the customer already exists using email or phone number
     const checkQuery = `SELECT * FROM vehicles WHERE vin = $1;`; // Use the correct table
     const checkResult = await pool.query(checkQuery, [vin]);
@@ -307,7 +306,7 @@ app.post("/new_vehicle", async (req, res) => {
       !color
     ) {
       return res.status(400).json({
-        error: "Please fill in all fields are required.",
+        error: "Please fill in, all fields are required.",
       });
     }
 
@@ -430,12 +429,85 @@ app.patch("/update_vehicle/:vehicle_id", async (req, res) => {
   }
 });
 
+app.get("/vehicles/:identifier", async (req, res) => {
+  console.log("incoming vehicle search request");
+  try {
+    const identifier = req.params.identifier;
+    let query = `
+      SELECT
+        vehicle_id,
+        customer_id,
+        make,
+        model,
+        year,
+        license_plate,
+        vin,
+        color,
+        date_created,
+        time_created
+      FROM vehicles
+      WHERE `;
+    const values = [];
+
+    query += `
+      LOWER(vin) LIKE $1 OR
+      LOWER(make) LIKE $1 OR
+      LOWER(model) LIKE $1 OR
+      LOWER(license_plate) LIKE $1 OR
+      CAST(customer_id AS TEXT) LIKE $1
+    `;
+    values.push(`%${identifier.toLowerCase()}%`);
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length > 0) {
+      res.status(200).json({
+        message: "Vehicle(s) found.",
+        vehicles: result.rows,
+      });
+    } else {
+      res
+        .status(404)
+        .json({ message: "No vehicles found matching your criteria." });
+    }
+  } catch (error) {
+    console.error("Error fetching vehicle(s):", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
 //***************************************************************/*/
 //****** Route to handle every thing for the mechanics table ******//
 //***************************************************************/*/
 
 //********* Route to create new mechanic **********//
 
+app.get("/search_mechanics", async (req, res) => {
+  const { query } = req.query;
+
+  if (!query) {
+    return res.status(400).json({ error: "Search query is required." });
+  }
+
+  try {
+    const searchQuery = `
+      SELECT mechanic_id, fname, lname, email_address, phone_number
+      FROM mechanics
+      WHERE 
+        CAST(mechanic_id AS TEXT) LIKE $1 OR
+        LOWER(fname) LIKE $1 OR
+        LOWER(lname) LIKE $1 OR
+        LOWER(email_address) LIKE $1 OR
+        phone_number LIKE $1;
+    `;
+    const values = [`%${query.toLowerCase()}%`];
+    const result = await pool.query(searchQuery, values);
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error("Error searching mechanics:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 app.post("/add_mechanic", async (req, res) => {
   try {
     const { fname, lname, email_address, phone_number } = req.body;
@@ -558,7 +630,72 @@ app.patch("/update_mechanic/:mechanic_id", async (req, res) => {
 // Nodemailer transporter setup (example using Gmail)
 
 // Route for booking a scheduleconst { DateTime } = require("luxon");
+app.get("/schedules", async (req, res) => {
+  console.log("Incoming request to fetch all schedules");
+  try {
+    const query = `
+      SELECT
+        schedule_id,
+        customer_id,
+        vehicle_id,
+        service_type,
+        service_date,
+        date_created,
+        reminder_sent
+      FROM schedules;
+    `;
 
+    const result = await pool.query(query);
+
+    if (result.rows.length > 0) {
+      res.status(200).json({
+        message: "Schedules retrieved successfully",
+        schedules: result.rows,
+      });
+    } else {
+      res.status(200).json({
+        message: "No schedules found",
+        schedules: [],
+      });
+    }
+  } catch (error) {
+    console.error("Error fetching schedules:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+app.get("/pending_schedules", async (req, res) => {
+  console.log("Incoming request to fetch pending schedules");
+  try {
+    const query = `
+      SELECT
+        schedule_id,
+        customer_id,
+        vehicle_id,
+        service_type,
+        service_date,
+        date_created
+      FROM schedules
+      WHERE reminder_sent = FALSE;
+    `;
+
+    const result = await pool.query(query);
+
+    if (result.rows.length > 0) {
+      res.status(200).json({
+        message: "Pending schedules retrieved successfully",
+        pendingSchedules: result.rows,
+      });
+    } else {
+      res.status(200).json({
+        message: "No pending schedules found",
+        pendingSchedules: [],
+      });
+    }
+  } catch (error) {
+    console.error("Error fetching pending schedules:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 app.post("/book_schedule", async (req, res) => {
   try {
     const { customer_id, vehicle_id, service_type, service_date } = req.body;
@@ -745,6 +882,38 @@ cron.schedule("*/5 * * * *", async () => {
 //***************************************************/*/
 //********* Route to create new service log **********//
 //***************************************************/*/
+app.get("/service_logs", async (req, res) => {
+  try {
+    const query = `
+      SELECT
+        service_id,
+        vehicle_id,
+        service_type,
+        service_date,
+        service_details,
+        mechanic_id,
+        parts_replaced
+      FROM service_records;
+    `;
+
+    const result = await pool.query(query);
+
+    if (result.rows.length > 0) {
+      res.status(200).json({
+        message: "Service logs retrieved successfully",
+        serviceLogs: result.rows,
+      });
+    } else {
+      res.status(200).json({
+        message: "No service logs found",
+        serviceLogs: [],
+      });
+    }
+  } catch (error) {
+    console.error("Error fetching service logs:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 app.post("/create_service_log", async (req, res) => {
   try {
